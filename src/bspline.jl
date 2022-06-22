@@ -4,6 +4,14 @@ using BSplineKit
 include("exception.jl")
 include("algebra.jl")
 
+# AbstractBasisSplineStorage1D{np, ni} = Union{BasisSplineDenseStorage1D{np, ni}, BasisSplineSparseStorage1D{np, ni}}
+# AbstractBasisSplineStorage2D{np, ni} = Union{BasisSplineDenseStorage2D{np, ni}, BasisSplineSparseStorage2D{np, ni}}
+# BasisSplineStorage{np, ni} = Union{AbstractBasisSplineStorage1D{np, ni}, AbstractBasisSplineStorage2D{np, ni}}
+
+abstract type AbstractBasisSplineStorage{np, ni} end
+abstract type AbstractBasisSplineStorage1D{np, ni} <: AbstractBasisSplineStorage{np, ni} end
+abstract type AbstractBasisSplineStorage2D{np, ni} <: AbstractBasisSplineStorage{np, ni} end
+ 
 struct BasisSpline
     ndof::Int64
     lbound::Float64
@@ -38,12 +46,12 @@ struct BasisSpline
     end
 end
 
-mutable struct BasisSplineDenseStorage1D{np, ni}
+mutable struct BasisSplineDenseStorage1D{np, ni} <: AbstractBasisSplineStorage1D{np, ni}
     B::Matrix{Float64}
     dB::Matrix{Float64}
 end
 
-mutable struct BasisSplineDenseStorage2D{np, ni}
+mutable struct BasisSplineDenseStorage2D{np, ni} <: AbstractBasisSplineStorage2D{np, ni}
     B::Matrix{Float64}
     dB1::Matrix{Float64}
     dB2::Matrix{Float64}
@@ -52,12 +60,12 @@ mutable struct BasisSplineDenseStorage2D{np, ni}
     splines2::BasisSplineDenseStorage1D{np, ni2} where ni2
 end
 
-mutable struct BasisSplineSparseStorage1D{np, ni}
+mutable struct BasisSplineSparseStorage1D{np, ni} <: AbstractBasisSplineStorage1D{np, ni}
     B::SparseMatrixCSC{Float64, Int64}
     dB::SparseMatrixCSC{Float64, Int64}
 end
 
-mutable struct BasisSplineSparseStorage2D{np, ni}
+mutable struct BasisSplineSparseStorage2D{np, ni} <: AbstractBasisSplineStorage2D{np, ni}
     B::SparseMatrixCSC{Float64, Int64}
     dB1::SparseMatrixCSC{Float64, Int64}
     dB2::SparseMatrixCSC{Float64, Int64}
@@ -66,43 +74,40 @@ mutable struct BasisSplineSparseStorage2D{np, ni}
     splines2::BasisSplineSparseStorage1D{np, ni2} where ni2
 end
 
-BasisSplineStorage1D{np, ni} = Union{BasisSplineDenseStorage1D{np, ni}, BasisSplineSparseStorage1D{np, ni}}
-BasisSplineStorage2D{np, ni} = Union{BasisSplineDenseStorage2D{np, ni}, BasisSplineSparseStorage2D{np, ni}}
-BasisSplineStorage{np, ni} = Union{BasisSplineStorage1D{np, ni}, BasisSplineStorage2D{np, ni}}
 
 
-function nparticles(splineStorage::BasisSplineStorage{np, ni}) where {np, ni}
+function nparticles(splineStorage::AbstractBasisSplineStorage{np, ni}) where {np, ni}
     return np
 end
 
-function ndof(splineStorage::BasisSplineStorage{np, ni}) where {np, ni}
+function ndof(splineStorage::AbstractBasisSplineStorage{np, ni}) where {np, ni}
     return ni
 end
 
 ndof(spline::BasisSpline) = spline.ndof
 ndof(splines::AbstractVector{BasisSpline}) = prod(ndof.(splines))
 
-function ndim(splineStorage::BasisSplineStorage1D)
+function ndim(splineStorage::AbstractBasisSplineStorage1D)
     return 1
 end
 function ndim(splineStorage::BasisSplineSparseStorage1D)
     return 1
 end
 
-function ndim(splineStorage::BasisSplineStorage2D)
+function ndim(splineStorage::AbstractBasisSplineStorage2D)
     return 2
 end
 function ndim(splineStorage::BasisSplineSparseStorage2D)
     return 2
 end
 
-function Base.isapprox(spline1::BasisSplineStorage, spline2::BasisSplineStorage)
+function Base.isapprox(spline1::AbstractBasisSplineStorage, spline2::AbstractBasisSplineStorage)
     if typeof(spline1) !== typeof(spline2)
         return false
-    elseif typeof(spline1) <: BasisSplineStorage1D || typeof(spline1) <: BasisSplineSparseStorage1D
+    elseif typeof(spline1) <: AbstractBasisSplineStorage1D || typeof(spline1) <: BasisSplineSparseStorage1D
         return  isapprox(spline1.B, spline2.B) &&
                 isapprox(spline1.dB, spline2.dB)
-    elseif typeof(spline1) <: BasisSplineStorage2D|| typeof(spline1) <: BasisSplineSparseStorage2D
+    elseif typeof(spline1) <: AbstractBasisSplineStorage2D|| typeof(spline1) <: BasisSplineSparseStorage2D
         return  isapprox(spline1.B, spline2.B) &&
                 isapprox(spline1.dB1, spline2.dB1) &&
                 isapprox(spline1.dB2, spline2.dB2)
@@ -172,11 +177,11 @@ function _compute_coxdeboor_coefficients(position::Real, knot::AbstractVector{<:
     return A, B
 end
 
-function compute_bspline_values!(storage::BasisSplineStorage1D, coord::AbstractVecOrMat{<:Real}, spline::AbstractVector{BasisSpline}) 
+function compute_bspline_values!(storage::AbstractBasisSplineStorage1D, coord::AbstractVecOrMat{<:Real}, spline::AbstractVector{BasisSpline}) 
     compute_bspline_values!(storage, coord, spline[begin])
 end
 
-function compute_bspline_values!(storage::BasisSplineStorage1D, coord::AbstractVecOrMat{<:Real}, spline::BasisSpline)
+function compute_bspline_values!(storage::AbstractBasisSplineStorage1D, coord::AbstractVecOrMat{<:Real}, spline::BasisSpline)
     storage.B .= 0
     storage.dB .= 0
     for i = 1:length(coord)
@@ -184,7 +189,7 @@ function compute_bspline_values!(storage::BasisSplineStorage1D, coord::AbstractV
     end
 end
 
-function _recursive_bspline_particle!(storage::BasisSplineStorage1D, coord::AbstractVecOrMat{<:Real}, spline::BasisSpline, deg::Int, p::Int)
+function _recursive_bspline_particle!(storage::AbstractBasisSplineStorage1D, coord::AbstractVecOrMat{<:Real}, spline::BasisSpline, deg::Int, p::Int)
     if deg == 0
         index = findlast(x->x<=coord[p], spline.knot_vector)
         if index <= spline.ndof
@@ -242,7 +247,7 @@ function compute_bspline_values!(storage::BasisSplineDenseStorage2D, coord1::Abs
     return storage
 end
 
-function compute_bspline_values!(storage::BasisSplineStorage2D, coord::AbstractMatrix{<:Real}, splines::AbstractVector{BasisSpline})
+function compute_bspline_values!(storage::AbstractBasisSplineStorage2D, coord::AbstractMatrix{<:Real}, splines::AbstractVector{BasisSpline})
     compute_bspline_values!(storage, coord[:, 1], coord[:, 2], splines[1], splines[2])
 end
 

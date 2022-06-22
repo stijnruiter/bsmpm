@@ -42,7 +42,7 @@ function σ_yy_analytic(x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, t:
     return  (lame.λ * log.(Dxx.*Dyy) + lame.μ * (Dyy.^2 .- 1)) ./ (Dxx .* Dyy)
 end
 
-function deform_body_force(t::Real, model::Model{2}, particles::Particles{2, np}, mpmgrid::MPMGrid{2}, splines::BasisSplineStorage) where np
+function deform_body_force(t::Real, model::Model{2}, particles::Particles{2, np}, mpmgrid::MPMGrid{2}, splines::AbstractBasisSplineStorage) where np
     global u_0, lame
 
     initial_position = particles.position - particles.displacement

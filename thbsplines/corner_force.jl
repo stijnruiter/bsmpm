@@ -1,50 +1,53 @@
 using Plots
 include("../src/simulation.jl")
+include("../src/thbspline_2d.jl")
 
-
-L = 60
-H = 80
+L = 1
+H = 1
 nix = 10
 niy = 10
 nppc = 12
-degree = 1
-E = 1
-ρ = 1
-Δt = 5e-5
-tN = 1000
+degree = 2
+E = 1e2
+ρ = 1e3
+Δt = 1e-6
+tN = 50
 tend = Δt * tN
 τ = 1
 α = (L*τ)/(ρ * π)
-ν = 0.499
+ν = 0.4
+corners = [ (0.0, 0.0),
+            (L, 0.0),
+            (L, H),
+            (0.0, H)]
 
-corners = [ (0.0,   0.0),
-            (48.0, 44.0),
-            (48.0, 60.0),
-            (0.0,  44.0)]
-
-function upwards_force(t::Real, model::Model{2}, particles::Particles{2, np}, mpmgrid::MPMGrid{2}, splines::AbstractBasisSplineStorage) where np
-    global traction_storage, left_bottom_corner_index
-    current_bottom_right_corner_particle = particles.position[left_bottom_corner_index, :]
-    F = 1e3
-    compute_bspline_values!(traction_storage, current_bottom_right_corner_particle, mpmgrid.splines)
-    return  traction_storage.B' *[zeros(length(left_bottom_corner_index))  F * ones(length(left_bottom_corner_index))]
+function corner_force(t::Real, model::Model{2}, particles::Particles{2, np}, mpmgrid::HierarchicalMPMGrid2D, splines::AbstractBasisSplineStorage) where np
+    global L, τ, α, traction_storage, oppY
+    current_topright_corner_particle = (particles.position[end, :].+sqrt(particles.volume[end])/2)'
+    F = 40
+    compute_bspline_values!(traction_storage, current_topright_corner_particle, mpmgrid)
+    return traction_storage.B' * [F F]
 end
 
-
-mpmgrid = MPMGrid((0, L), nix, degree, (0, H), niy, degree)
+mpmgrid = MPMGrid((0, L*2), nix, degree, (0, H*2), niy, degree)
 particles = initialize_uniform_particles(ρ, corners, (nix - 1) * nppc, (niy - 1) * nppc) 
-left_bottom_corner_index = findall((particles.position[:, 1] .≈ 48))
+Ω0 = Rect(0, 0, L*2, H*2)
+Ω1 = [Rect(.5, .5, 1.5, 1.5)]
+# Ω2 = [Rect(0, 0, .5, .5)]
+thb_domains = HierarchicalDomain2D(Ω0, Ω1)
+thb_grid = HierarchicalMPMGrid2D(mpmgrid, thb_domains)
+thb_storage = initialize_spline_storage(nparticles(particles), thb_grid)
+dirichlet = get_boundary_indices(thb_grid, fix_left=true, fix_bottom=true)
 
-dirichlet = get_boundary_indices(mpmgrid, fix_left=true, fix_bottom = true)
 model = initialize_model_2D(ρ, E, ν, Δt, tN; 
         dirichlet = dirichlet, 
-        traction_force = upwards_force,
-        constitutive_model = hooke_linear_elastic)
-spline_storage = initialize_spline_storage(particles, mpmgrid)
-traction_storage = initialize_spline_storage(length(left_bottom_corner_index), mpmgrid)
-tend = run(model, particles, mpmgrid, spline_storage);
-
-
+        traction_force = corner_force,
+        constitutive_model = hooke_linear_elastic_deform,
+        runparams = RunParameters(true, false, false, :deformation))
+# spline_storage = initialize_spline_storage(particles, mpmgrid)
+traction_storage = initialize_spline_storage(1, thb_grid)
+tend = 0
+tend = run(model, particles, thb_grid, thb_storage);
 
 initial_position = particles.position - particles.displacement
 xinit = reshape(initial_position[:, 1], (nix - 1) * nppc, (niy-1)*nppc)
@@ -74,3 +77,4 @@ display(figu)
 display(figs)
 display(figmagu)
 display(fig_vonmis)
+display(scatter(particles.position[:, 1], particles.position[:, 2], legend=false, title="Particle positions as t=$(tend)s", xlabel="x [m]", ylabel="y [m]"))

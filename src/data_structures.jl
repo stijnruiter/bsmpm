@@ -1,5 +1,8 @@
 include("bspline.jl")
-struct MPMGrid{dim}
+
+abstract type AbstractMPMGrid{dim} end
+
+struct MPMGrid{dim} <: AbstractMPMGrid{dim}
     splines::Vector{BasisSpline}
     bounds::Vector{Tuple{Float64, Float64}}
 
@@ -35,6 +38,13 @@ struct MPMGrid{dim}
         b = [(splines[i].knot_vector[begin], splines[i].knot_vector[end]) for i = 1:dim]
         return new{dim}(s, b)
     end
+end
+
+function compute_bspline_values!(storage::AbstractBasisSplineStorage1D, coord::AbstractVecOrMat{<:Real}, mpmgrid::MPMGrid{1})
+    compute_bspline_values!(storage, coord, mpmgrid.splines)
+end
+function compute_bspline_values!(storage::AbstractBasisSplineStorage2D, coord::AbstractMatrix{<:Real}, mpmgrid::MPMGrid{2})
+    compute_bspline_values!(storage, coord, mpmgrid.splines)
 end
 
 mutable struct Particles{dim, np}

@@ -52,7 +52,7 @@ function σ_analytic(x::Real, t::Real, L::Real, τ::Real)
     return σ
 end
 
-function rhs_traction(t::Real, model::Model{1}, particles::Particles{1, np}, mpmgrid::MPMGrid{1}, splines::BasisSplineStorage) where np
+function rhs_traction(t::Real, model::Model{1}, particles::Particles{1, np}, mpmgrid::MPMGrid{1}, splines::AbstractBasisSplineStorage) where np
     global L, τ, α, traction_storage
     current_rhs_boundary = L + u_analytic(L, t, L, α)
     current_rhs_traction = σ_analytic(L, t, L, τ)

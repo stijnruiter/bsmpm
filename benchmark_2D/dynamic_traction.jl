@@ -56,7 +56,7 @@ end
 
 oppY = oppBspline(0, H, niy, degree)
 
-function rhs_traction(t::Real, model::Model{2}, particles::Particles{2, np}, mpmgrid::MPMGrid{2}, splines::BasisSplineStorage) where np
+function rhs_traction(t::Real, model::Model{2}, particles::Particles{2, np}, mpmgrid::MPMGrid{2}, splines::AbstractBasisSplineStorage) where np
     global L, τ, α, traction_storage, oppY
     current_rhs_boundary = L + u_analytic(L, t, L, α)
     current_rhs_traction = σ_analytic(L, t, L, τ)

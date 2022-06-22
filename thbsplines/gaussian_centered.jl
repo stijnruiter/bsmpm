@@ -40,11 +40,19 @@ t = 0
 particles.σ[:, 1] = bivariate_guassian(particles.position, (L/2, H/2), (0.1, 0.1))
 particles.σ[:, 4] = -bivariate_guassian(particles.position, (L/2, H/2), (0.1, 0.1))
 
+Ω0 = Rect(0, 0, L, H)
+Ω1 = [Rect(L/4, L/4, 3/4*L, 3/4*L)]
+thb_domains = HierarchicalDomain2D(Ω0, Ω1)
+thb_grid = HierarchicalMPMGrid2D(mpmgrid, thb_domains)
+thb_storage = initialize_spline_storage(nparticles(particles), thb_grid)
+dirichlet = get_boundary_indices(thb_grid, fix_left=true, fix_bottom=true)
 
-dirichlet = get_boundary_indices(mpmgrid)#; fix_left=true, fix_right=true, fix_top=true, fix_bottom=true)
+
+
+
+dirichlet = get_boundary_indices(thb_grid)#; fix_left=true, fix_right=true, fix_top=true, fix_bottom=true)
 model = initialize_model_2D(ρ, E, ν, Δt, tN; dirichlet = dirichlet)#, body_force = deform_body_force)#, traction_force = axis_aligned_traction)
-spline_storage = initialize_spline_storage(particles, mpmgrid)
-tend = run(model, particles, mpmgrid, spline_storage);
+tend = run(model, particles, thb_grid, thb_storage);
 
 initial_position = particles.position - particles.displacement
 xinit = reshape(initial_position[:, 1], (nix - 1) * nppc, (niy-1)*nppc)

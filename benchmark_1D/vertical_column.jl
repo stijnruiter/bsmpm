@@ -40,7 +40,7 @@ function σ_analytic(y::Real, t::Real, ρ::Real, g::Real, E::Real, H::Real; tayl
     return σ_true
 end
 
-function graviation(t::Real, model::Model{1}, particles::Particles{1, np}, mpmgrid::MPMGrid{1}, splines::BasisSplineStorage) where np
+function graviation(t::Real, model::Model{1}, particles::Particles{1, np}, mpmgrid::MPMGrid{1}, splines::AbstractBasisSplineStorage) where np
     global g
     return splines.B'*(particles.mass .* -g)
 end
