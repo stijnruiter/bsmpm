@@ -112,12 +112,17 @@ function populate_square_or_triangle(corners::AbstractVector{T}, np1::Int, np2::
     t = range(0, stop=1, length=np2)
     n  = 1
     pos = zeros(length(s) * length(t), 2)
+    bel = BitVector(undef, np1*np2)
+    bel .= 0
     if length(corners) < 3
         throw(ErrorException("Not enough corners"))
     elseif length(corners) == 3
         for i ∈ s
             for j ∈ t
                 pos[n,begin], pos[n, end] = (1-j)*i .*corners[1] .+ j .*i .* corners[2] .+ (1-i).* corners[3]
+                if i == 1 || j == 1 || i == 0 || j == 0
+                    bel[n] = 1
+                end
                 n += 1
             end
         end
@@ -125,11 +130,14 @@ function populate_square_or_triangle(corners::AbstractVector{T}, np1::Int, np2::
         for i ∈ s
             for j ∈ t
                 pos[n,begin], pos[n, end] = (1-j) .*((1-i).*corners[1] .+ i .*corners[2]) .+ j.*((1-i).*corners[4] .+ i .*corners[3])
+                if i == 1 || j == 1 || i == 0 || j == 0
+                    bel[n] = 1
+                end
                 n += 1
             end
         end
     end
-    return pos
+    return pos, bel
 end
 function opp_square_or_triangle(corners::AbstractVector{T}) where T<:Tuple{<:Real, <:Real}
     if length(corners) < 3

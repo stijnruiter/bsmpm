@@ -51,6 +51,7 @@ mutable struct Particles{dim, np}
     position::Matrix{Float64}
     velocity::Matrix{Float64}
     displacement::Matrix{Float64}
+    bel::BitVector
 
     # ϵ::Vector{Matrix{Float64}}
     # σ::Vector{Matrix{Float64}}
@@ -96,6 +97,8 @@ mutable struct Particles{dim, np}
         strain = zeros(np, dim*dim)
         stress = zeros(np, dim*dim)
         deformation = get_identity_matrix(np, dim)
+        bel = BitVector(undef, np)
+        bel .= 0
         
         # strain = [zeros(dim, dim) for i = 1:np]
         # stress = [zeros(dim, dim) for i = 1:np]
@@ -105,6 +108,7 @@ mutable struct Particles{dim, np}
         return new{dim, np}(position, 
                             velocity,
                             displacement,
+                            bel,
                             strain,
                             stress,
                             deformation,
@@ -139,6 +143,13 @@ function initialize_uniform_particles(grid::MPMGrid{dim}, ρ::Real, np::Int64...
     particles.ρ .= ρ
     particles.volume .= prod(dx)
     particles.mass .= particles.volume .* particles.ρ
+    bel = BitVector(undef, nparticles)
+    bel .= 0
+    bel[1:np[2]] .= 1
+    bel[1:np[2]:end] .= 1
+    bel[np[2]:np[2]:end] .= 1
+    bel[(end-np[2]-1):end] .= 1
+    particles.bel = bel
     return particles
 end
 
@@ -153,7 +164,7 @@ function initialize_uniform_particles(ρ::Real, corners::AbstractVector{T}, np::
     elseif length(corners) > 4
         throw(NotImplementedException("More then 4 corners is not supported"))
     end
-    positions = populate_square_or_triangle(corners, np[1], np[2])
+    positions, bel = populate_square_or_triangle(corners, np[1], np[2])
     total_volume = opp_square_or_triangle(corners)
     particles = Particles(positions, ρ)
     particles.ρ .= ρ
@@ -161,7 +172,26 @@ function initialize_uniform_particles(ρ::Real, corners::AbstractVector{T}, np::
     particles.mass .= particles.volume .* particles.ρ
     return particles
 end
-
+function initialize_uniform_particles_circle(grid::MPMGrid{2}, ρ::Real, radius::Real, npr::Int64, npθ::Int64)
+    dr = radius / (npr + 1) / 2
+    dθ = 2π / (npθ + 1) / 2
+    r = range(dr, stop=(radius-dr), length=npr)
+    θ = range(dθ, stop=(2π-dθ), length=npθ)
+    rk = kron(ones(npθ), r)
+    θk = kron(θ, ones(npr))
+    positions = zeros(npr*npθ, 2)
+    positions[:, 1] = rk .* cos.(θk)
+    positions[:, 2] = rk .* sin.(θk)
+    vp = rk .* dr .* dθ * 4
+    particles = Particles(positions, ρ)
+    particles.ρ .= ρ
+    particles.volume .= vp
+    particles.mass .= particles.volume .* particles.ρ
+    rbel = zeros(npr)
+    rbel[end] = 1
+    particles.bel = BitVector(kron(ones(npθ), rbel))
+    return particles
+end
 
 ndof(mpmgrid::MPMGrid) = ndof(mpmgrid.splines)
 
