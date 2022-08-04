@@ -57,18 +57,28 @@ function rhs_traction(t::Real, model::Model{1}, particles::Particles{1, np}, mpm
     current_rhs_boundary = L + u_analytic(L, t, L, α)
     current_rhs_traction = σ_analytic(L, t, L, τ)
     compute_bspline_values!(traction_storage, [current_rhs_boundary], mpmgrid.splines[1])
+    if model.runparams.spline == :webspline
+        # j = 52
+        # e_ij = [0.5; -1.5; 2.0]
+        # stable_supp = [49; 50; 51]
+        # traction_storage.B[:, stable_supp] += traction_storage.B[:, j] * e_ij'
+        web_splines!(traction_storage, mpmgrid.splines[1], particles.position[particles.bel] )
+    end
     return traction_storage.B'*current_rhs_traction
 end
 
 mpmgrid = MPMGrid((0, L), ni, degree)
 particles = initialize_uniform_particles(mpmgrid, ρ, (ni - 1) * nppc)
+particles.bel .= 0
+particles.bel[begin] = 1
+particles.bel[end] = 1
 mpmgrid = MPMGrid((0, L+u_analytic(L, 1, L, α)), ni, degree)
 dirichlet = get_boundary_indices(mpmgrid; fix_left = true)#, fix_top=true, fix_bottom=true)
 model = initialize_model_1D(ρ, E, Δt, tN; 
             dirichlet = dirichlet, 
             traction_force = rhs_traction,
             constitutive_model = hooke_linear_elastic_deform,
-            runparams = RunParameters(true, false, false, :deformation))
+            runparams = RunParameters(true, false, false, :deformation, :webspline))
 spline_storage = initialize_spline_storage(particles, mpmgrid)
 traction_storage = initialize_spline_storage(1, mpmgrid.splines[1])
 tend = run(model, particles, mpmgrid, spline_storage);

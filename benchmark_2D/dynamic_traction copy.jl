@@ -5,7 +5,7 @@ include("../src/simulation.jl")
 L = 1
 H = 0.05
 nix = 21
-niy = 3
+niy = 2
 nppc = 4
 degree = 2
 E = 100
@@ -72,13 +72,20 @@ particles = initialize_uniform_particles(mpmgrid, ρ, (nix - 1) * nppc, (niy - 1
 particles.bel .= 0
 particles.bel[((nix-1)*nppc):((nix - 1) * nppc):end] .=1
 particles.bel[1:((nix - 1) * nppc):end] .=1
+
+fig=scatter(particles.position[:, 1], particles.position[:, 2])
+scatter!(fig,particles.position[particles.bel, 1], particles.position[particles.bel, 2])
+display(fig)
+# particles.bel .= 0
+# particles.bel[1:(nix - 1) * nppc:end] .= 1
+# particles.bel[(end-(nix - 1) * nppc + 1):end] .= 1
 mpmgrid = MPMGrid((0, L + u_analytic(L, 1, L, α)), nix, degree, (0, H), niy, degree)
 dirichlet = get_boundary_indices(mpmgrid; fix_left = true)#, fix_top=true, fix_bottom=true)
 model = initialize_model_2D(ρ, E, ν, Δt, tN; 
         dirichlet = dirichlet, 
         traction_force = rhs_traction,
         constitutive_model = hooke_linear_elastic,
-        runparams = RunParameters(true, false, false, :strain, :webspline))
+        runparams = RunParameters(true, false, false, :deformation, :bspline))
 spline_storage = initialize_spline_storage(particles, mpmgrid)
 traction_storage = initialize_spline_storage(1, mpmgrid.splines[1])
 tend = run(model, particles, mpmgrid, spline_storage);

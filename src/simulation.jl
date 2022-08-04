@@ -1,10 +1,20 @@
 include("data_structures.jl")
+include("webspline.jl")
+include("thbspline_2d.jl")
 
 struct RunParameters
     apply_bc_before_node_computation::Bool
     apply_bc_after_node_computation::Bool
     mass_lumping::Bool
     volume_update::Symbol
+    spline::Symbol
+    function RunParameters(apply_bc_before_node_computation::Bool=true, 
+                            apply_bc_after_node_computation::Bool=false,
+                            mass_lumping::Bool=false,
+                            volume_update::Symbol=:strain,
+                            spline::Symbol=:bspline)
+        return new(apply_bc_before_node_computation, apply_bc_after_node_computation,mass_lumping,volume_update,spline)
+    end
 end
 
 struct Model{dim}
@@ -19,6 +29,7 @@ struct Model{dim}
     body_force::Function
     constitutive_model::Function
     traction_force::Function
+    error::Function
 end
 
 struct LameParameters
@@ -28,6 +39,7 @@ end
 
 
 
+no_function(t::Real, model::Model{dim}, particles::Particles{dim, np}, mpmgrid::AbstractMPMGrid{dim}, splines::AbstractBasisSplineStorage) where {np, dim} = nothing
 no_traction_force(t::Real, model::Model{dim}, particles::Particles{dim, np}, mpmgrid::AbstractMPMGrid{dim}, splines::AbstractBasisSplineStorage) where {np, dim} = zeros(ndof(splines), dim)
 no_body_force(t::Real, model::Model{dim}, particles::Particles{dim, np}, mpmgrid::AbstractMPMGrid{dim}, splines::AbstractBasisSplineStorage) where {np, dim} = zeros(ndof(splines), dim)
 
@@ -52,15 +64,23 @@ function hooke_linear_elastic(t::Real, model::Model{2}, particles::Particles{2, 
     # trace = lame.λ * compute_mat_trace(strainrate)
     # particles.σ[:, 1] += trace
     # particles.σ[:, 4] += trace
-    return particles.σ + lame.λ * compute_mat_trace(strainrate) .* get_identity_matrix(np, 2) + 2 * lame.μ * strainrate 
+    return particles.σ + lame.λ * compute_mat_trace(strainrate) .* get_identity_matrix(np, 2) + 2 * lame.μ * strainrate
 end
 
 function hooke_linear_elastic_deform(t::Real, model::Model{dim}, particles::Particles{dim, np}, mpmgrid::AbstractMPMGrid{dim}, splines::AbstractBasisSplineStorage, strainrate::AbstractVecOrMat) where {np, dim} 
     lame = compute_lame_parameters(model)
     J = compute_determinant(particles.deformation)
-    symFminI = compute_symmetric(particles.deformation) - get_identity_matrix(np, dim)
 
-    return lame.λ ./ J .* compute_mat_trace(symFminI) .* particles.deformation + 2 * lame.μ ./ J .* particles.deformation .* symFminI
+    if dim == 2
+        symFminI = (particles.deformation + view(particles.deformation, :, [1, 3, 2, 4] )) / 2 - get_identity_matrix(np, dim)
+    else 
+        symFminI = particles.deformation - get_identity_matrix(np, dim)
+    end
+
+
+    # symFminI = compute_symmetric(particles.deformation) - get_identity_matrix(np, dim)
+
+    return lame.λ ./ J .* compute_mat_trace(symFminI) .* particles.deformation + 2 * lame.μ ./ J .* compute_matrix_product(particles.deformation, symFminI)
 end
 
 function hooke_large_deformation(t::Real, model::Model{1}, particles::Particles{1, np}, mpmgrid::AbstractMPMGrid{1}, splines::AbstractBasisSplineStorage, strainrate::AbstractVecOrMat) where np 
@@ -87,7 +107,7 @@ function neo_hookean(t::Real, model::Model{1}, particles::Particles{1, np}, mpmg
     # particles.σ[:, 1] += (lame.λ * log(J) - lame.μ) ./ J
     # particles.σ[:, 4] += (lame.λ * log(J) - lame.μ) ./ J
 
-    particles.σ + (lame.λ * log.(J) .- lame.μ) ./ J .* get_identity_matrix(np, 1) + compute_matrix_product_transposed(particles.deformation, particles.deformation) ./ J
+    particles.σ + (lame.λ * log.(J) .- lame.μ)  .* get_identity_matrix(np, 1) + compute_matrix_product_transposed(particles.deformation, particles.deformation) 
 end
 
 function neo_hookean(t::Real, model::Model{2}, particles::Particles{2, np}, mpmgrid::AbstractMPMGrid{2}, splines::AbstractBasisSplineStorage, strainrate::AbstractVecOrMat) where np 
@@ -105,9 +125,10 @@ function initialize_model_1D(ρ::Real, E::Real, dt::Real, number_of_timesteps::I
     body_force::Function = no_body_force, 
     constitutive_model::Function = hooke_linear_elastic,
     traction_force::Function = no_traction_force,
+    error::Function = no_function,
     runparams::RunParameters = RunParameters(true, false, false, :strain))
     ν = 0
-    return Model{1}(ρ, E, ν, dt, number_of_timesteps, dt * number_of_timesteps, runparams, dirichlet, body_force, constitutive_model, traction_force)
+    return Model{1}(ρ, E, ν, dt, number_of_timesteps, dt * number_of_timesteps, runparams, dirichlet, body_force, constitutive_model, traction_force, error)
 end
 
 function initialize_model_2D(ρ::Real, E::Real, ν::Real, dt::Real, number_of_timesteps::Int;
@@ -115,16 +136,17 @@ function initialize_model_2D(ρ::Real, E::Real, ν::Real, dt::Real, number_of_ti
     body_force::Function = no_body_force, 
     constitutive_model::Function = hooke_linear_elastic,
     traction_force::Function = no_traction_force,
+    error::Function  = no_function,
     runparams::RunParameters = RunParameters(true, false, false, :strain))
     ν = 0
-    return Model{2}(ρ, E, ν, dt, number_of_timesteps, dt * number_of_timesteps, runparams, dirichlet, body_force, constitutive_model, traction_force)
+    return Model{2}(ρ, E, ν, dt, number_of_timesteps, dt * number_of_timesteps, runparams, dirichlet, body_force, constitutive_model, traction_force, error)
 end
 
 function compute_internal_force(splines::AbstractBasisSplineStorage1D, particles::Particles)
     splines.dB' * (particles.σ .* particles.volume)
 end
 function compute_internal_force(splines::AbstractBasisSplineStorage2D, particles::Particles)
-    [(splines.dB1' * (particles.σ[:, 1] .* particles.volume) + splines.dB2' * (particles.σ[:, 2] .* particles.volume)) (splines.dB1' *  (particles.σ[:, 3] .* particles.volume) + splines.dB2' *  (particles.σ[:, 4] .* particles.volume))]
+    [(splines.dB1' * (particles.σ[:, 1] .* particles.volume) + splines.dB2' * (particles.σ[:, 3] .* particles.volume)) (splines.dB1' *  (particles.σ[:, 2] .* particles.volume) + splines.dB2' *  (particles.σ[:, 4] .* particles.volume))]
 end
 
 function compute_velocity_gradient(splines::AbstractBasisSplineStorage1D, nodal_velocity::AbstractVecOrMat{Float64})
@@ -147,7 +169,21 @@ function get_active_mass_matrix(particles::Particles, storage::AbstractBasisSpli
 end
 
 function nextstep!(t::Real, model::Model{dim}, particles::Particles{dim, np}, mpmgrid::AbstractMPMGrid, splines::AbstractBasisSplineStorage) where {dim, np}
-    compute_bspline_values!(splines, particles.position, mpmgrid)
+    if isa(thb_grid, HierarchicalMPMGrid2D)
+        if model.runparams.spline == :bspline
+            compute_thbspline_values!(splines, particles, mpmgrid)
+        elseif model.runparams.spline == :webspline
+            compute_ethbspline_values!(splines, particles, mpmgrid)
+        else
+            throw(ErrorException("Unsupported THB spline type"))
+        end
+    elseif model.runparams.spline == :bspline
+        compute_bspline_values!(splines, particles.position, mpmgrid)
+    elseif model.runparams.spline == :webspline
+        compute_webspline_values!(splines, mpmgrid, particles)
+    else
+        throw(ErrorException("Unsupported spline type"))
+    end
 
     # Calculate the mass matrix
     M = (splines.B .* particles.mass)' * splines.B
@@ -156,20 +192,31 @@ function nextstep!(t::Real, model::Model{dim}, particles::Particles{dim, np}, mp
         M = diagm(vec(sum(M, dims=2)))
     end
 
-    active, inactive = get_active_inactive_ndofs(M)
+    # active, inactive = get_active_inactive_ndofs(M)
+    active = splines.active
+    inactive = splines.active .== 0
 
 
     # Calculate the force at the degrees of freedom
     F_int = compute_internal_force(splines, particles)
 
-    F_ext = model.body_force(t, model, particles, mpmgrid, splines) + model.traction_force(t, model, particles, mpmgrid, splines)
+    F_b = model.body_force(t, model, particles, mpmgrid, splines)
+    F_t = model.traction_force(t, model, particles, mpmgrid, splines)
+    F_ext = F_b + F_t
+    # non_zero = F_ext[:, 1] .!= 0
+    # display(F_ext[non_zero, :]')
+    # display(M[non_zero, non_zero]')
     F = F_ext - F_int;
 
+    
+    # display(F[(spline_storage.B[end,:] .== 0) .== 0, :])
     F[inactive,:] .= 0
 
     # Calculate linear momentum
-    L = splines.B' * (particles.mass .* particles.velocity) + F * model.dt
-    L[inactive,:] .= 0
+
+    L = zeros(ndof(mpmgrid), dim)
+    L[active, :] = splines.B[:, active]' * (particles.mass .* particles.velocity) + F[active, :] * model.dt
+    # L[inactive,:] .= 0
 
     if model.runparams.apply_bc_before_node_computation
         mass_val = tr(M) / ndof(mpmgrid)
@@ -194,9 +241,9 @@ function nextstep!(t::Real, model::Model{dim}, particles::Particles{dim, np}, mp
     end
 
     # update particles
-    particles.velocity += splines.B * A * model.dt
-    particles.displacement += splines.B * v_I * model.dt
-    particles.position += splines.B * v_I * model.dt
+    particles.velocity += splines.B[:, active] * A[active, :] * model.dt
+    particles.displacement += splines.B[:, active] * v_I[active, :] * model.dt
+    particles.position += splines.B[:, active] * v_I[active, :] * model.dt
 
     # Strain increment
     ∇VI = compute_velocity_gradient(splines, v_I)
@@ -219,13 +266,14 @@ function nextstep!(t::Real, model::Model{dim}, particles::Particles{dim, np}, mp
         throw(NotImplementedException("Only :deformation and :strain are available as volume update"))
     end
 
-    # particles.ρ = particles.mass ./ particles.volume
+    particles.ρ = particles.mass ./ particles.volume
+
     # d["particles"].ρ = d["particles"].ρ ./ (1 .+ dϵp)
 end
 
 function run(model::Model, particles::Particles{dim, np}, mpmgrid::AbstractMPMGrid, splines::AbstractBasisSplineStorage) where {dim, np}
     t = 0
-    println("Simulation starting")
+    println("Simulation starting using $(model.runparams.spline)")
     println("Δt=$(model.dt)s")
     println("t_end=$(model.dt*model.tN)s")
     print("Progress: 0/$(model.tN)")
@@ -233,11 +281,21 @@ function run(model::Model, particles::Particles{dim, np}, mpmgrid::AbstractMPMGr
     for i = 1:model.tN
         nextstep!(t, model, particles, mpmgrid, splines)
         t = i * model.dt
+        model.error(t, model, particles, mpmgrid, splines)
         if i % t_procent == 0
             print("\e[2K") # rm line
             print("\e[1G") # curson start
             print("Progress: $(i)/$(model.tN)")
         end
+        # if i > 20
+        #     print("\e[2K")
+        #     print("\e[1G")
+        #     printstyled("┌ Error:"; color = :red, bold = true)
+        #     println(" Error trying to display an error.")
+        #     printstyled("└"; color=:red, bold=true)
+        #     printstyled(" @ VSCodeServer c:\\Users\\stijn\\.vscode\\extensions\\julialang.language-julia-1.6.24\\scripts\\packages\\VSCodeServer\\src\\eval.jl:321\n"; color=:black)
+        #     return t
+        # end
     end
     print("\e[2K")
     print("\e[1G")

@@ -27,7 +27,7 @@ struct BasisSpline
             throw(InvalidDefinitionException("Polynomial degree cannot be negative"))
         elseif !ismonotonic(knot_vector)
             throw(InvalidDefinitionException("The knot vector should be monotonically increasing"))
-        elseif all(knot_vector[2:degree] .!= knot_vector[begin]) || all(knot_vector[(end - degree):(end-1)] .!= knot_vector[end])
+        elseif !(length(unique(knot_vector[begin:(degree+1)])) == length(unique(knot_vector[(end - degree):end])) == 1)
             throw(InvalidDefinitionException("Knot vector has not enough repeating begin and start values"))
         end
     end
@@ -49,6 +49,7 @@ end
 mutable struct BasisSplineDenseStorage1D{np, ni} <: AbstractBasisSplineStorage1D{np, ni}
     B::Matrix{Float64}
     dB::Matrix{Float64}
+    active::BitVector
 end
 
 mutable struct BasisSplineDenseStorage2D{np, ni} <: AbstractBasisSplineStorage2D{np, ni}
@@ -58,11 +59,13 @@ mutable struct BasisSplineDenseStorage2D{np, ni} <: AbstractBasisSplineStorage2D
     temp_store::Matrix{Float64}
     splines1::BasisSplineDenseStorage1D{np, ni1} where ni1
     splines2::BasisSplineDenseStorage1D{np, ni2} where ni2
+    active::BitVector
 end
 
 mutable struct BasisSplineSparseStorage1D{np, ni} <: AbstractBasisSplineStorage1D{np, ni}
     B::SparseMatrixCSC{Float64, Int64}
     dB::SparseMatrixCSC{Float64, Int64}
+    active::BitVector
 end
 
 mutable struct BasisSplineSparseStorage2D{np, ni} <: AbstractBasisSplineStorage2D{np, ni}
@@ -72,6 +75,7 @@ mutable struct BasisSplineSparseStorage2D{np, ni} <: AbstractBasisSplineStorage2
     temp_store::SparseMatrixCSC{Float64, Int64}
     splines1::BasisSplineSparseStorage1D{np, ni1} where ni1
     splines2::BasisSplineSparseStorage1D{np, ni2} where ni2
+    active::BitVector
 end
 
 
@@ -124,9 +128,9 @@ end
 
 function initialize_spline_storage(nparticles::Int64, spline::BasisSpline; sparse=false)
     if sparse
-        BasisSplineSparseStorage1D{nparticles, spline.ndof}(spzeros(nparticles, spline.ndof), spzeros(nparticles, spline.ndof))
+        BasisSplineSparseStorage1D{nparticles, spline.ndof}(spzeros(nparticles, spline.ndof), spzeros(nparticles, spline.ndof), BitVector(ones(spline.ndof)))
     else
-        BasisSplineDenseStorage1D{nparticles, spline.ndof}(zeros(nparticles, spline.ndof), zeros(nparticles, spline.ndof))
+        BasisSplineDenseStorage1D{nparticles, spline.ndof}(zeros(nparticles, spline.ndof), zeros(nparticles, spline.ndof), BitVector(ones(spline.ndof)))
     end
 end
 
@@ -143,9 +147,9 @@ function initialize_spline_storage(nparticles::Int64, spline1::BasisSpline, spli
     storage2 = initialize_spline_storage(nparticles, spline2; sparse=sparse)
     ndof_t = spline1.ndof * spline2.ndof
     if sparse
-        BasisSplineSparseStorage2D{nparticles, ndof_t}(spzeros(nparticles, ndof_t), spzeros(nparticles, ndof_t), spzeros(nparticles, ndof_t), spzeros(nparticles, ndof_t), storage1, storage2)
+        BasisSplineSparseStorage2D{nparticles, ndof_t}(spzeros(nparticles, ndof_t), spzeros(nparticles, ndof_t), spzeros(nparticles, ndof_t), spzeros(nparticles, ndof_t), storage1, storage2, BitVector(ones(ndof_t)))
     else
-        BasisSplineDenseStorage2D{nparticles, ndof_t}(zeros(nparticles, ndof_t), zeros(nparticles, ndof_t), zeros(nparticles, ndof_t), zeros(nparticles, ndof_t), storage1, storage2)
+        BasisSplineDenseStorage2D{nparticles, ndof_t}(zeros(nparticles, ndof_t), zeros(nparticles, ndof_t), zeros(nparticles, ndof_t), zeros(nparticles, ndof_t), storage1, storage2, BitVector(ones(ndof_t)))
     end
 end
 
@@ -187,6 +191,7 @@ function compute_bspline_values!(storage::AbstractBasisSplineStorage1D, coord::A
     for i = 1:length(coord)
         _recursive_bspline_particle!(storage, coord, spline, spline.degree, i)
     end
+    storage.active = (vec(all(storage.B .== 0, dims=1)).==0)
 end
 
 function _recursive_bspline_particle!(storage::AbstractBasisSplineStorage1D, coord::AbstractVecOrMat{<:Real}, spline::BasisSpline, deg::Int, p::Int)
@@ -227,6 +232,7 @@ function compute_bspline_values!(storage::BasisSplineSparseStorage2D, coord1::Ab
     storage.B .= kron(ones(1, spline2.ndof),storage.splines1.B).*kron(storage.splines2.B, ones(1, spline1.ndof))
     storage.dB1 .= kron(ones(1, spline2.ndof),storage.splines1.dB).*kron(storage.splines2.B, ones(1, spline1.ndof))
     storage.dB2 .= kron(ones(1, spline2.ndof),storage.splines1.B).*kron(storage.splines2.dB, ones(1, spline1.ndof))
+    storage.active = (vec(all(spline_storage.B .== 0, dims=1)).==0)
     return storage
 end
 
@@ -243,6 +249,8 @@ function compute_bspline_values!(storage::BasisSplineDenseStorage2D, coord1::Abs
     storage.dB1 .*= storage.temp_store
     storage.dB2 .*= storage.B
     storage.B   .*= storage.temp_store
+
+    storage.active = (vec(all(storage.B .== 0, dims=1)).==0)
 
     return storage
 end

@@ -143,12 +143,12 @@ function initialize_uniform_particles(grid::MPMGrid{dim}, ρ::Real, np::Int64...
     particles.ρ .= ρ
     particles.volume .= prod(dx)
     particles.mass .= particles.volume .* particles.ρ
-    bel = BitVector(undef, nparticles)
-    bel .= 0
-    bel[1:np[2]] .= 1
-    bel[1:np[2]:end] .= 1
-    bel[np[2]:np[2]:end] .= 1
-    bel[(end-np[2]-1):end] .= 1
+    bel = BitVector(zeros(nparticles(particles)))
+    # bel .= 0
+    bel[1:np[1]] .= 1
+    bel[1:np[1]:end] .= 1
+    bel[np[1]:np[1]:end] .= 1
+    bel[(end-np[1]+1):end] .= 1
     particles.bel = bel
     return particles
 end
@@ -158,18 +158,20 @@ function initialize_uniform_particles(ρ::Real, lbound::Real, ubound::Real, np::
     initialize_uniform_particles(ρ, corners, np)
 end
 
-function initialize_uniform_particles(ρ::Real, corners::AbstractVector{T}, np::Int64...) where T<:Tuple{<:Real, <:Real}
+function initialize_uniform_particles(ρ::Real, corners::AbstractVector{T}, np::Int64...;onedge::Bool = false) where T<:Tuple{<:Real, <:Real}
     if length(corners) <= 2
         throw(ErrorException("Unable to populate 2 dimensional space with only 2 corners"))
     elseif length(corners) > 4
         throw(NotImplementedException("More then 4 corners is not supported"))
     end
-    positions, bel = populate_square_or_triangle(corners, np[1], np[2])
+    positions, bel = populate_square_or_triangle(corners, np[1], np[2]; onedge=onedge)
     total_volume = opp_square_or_triangle(corners)
     particles = Particles(positions, ρ)
     particles.ρ .= ρ
     particles.volume .= total_volume ./ nparticles(particles)
+    particles.volume0 .= particles.volume
     particles.mass .= particles.volume .* particles.ρ
+    particles.bel .= bel
     return particles
 end
 function initialize_uniform_particles_circle(grid::MPMGrid{2}, ρ::Real, radius::Real, npr::Int64, npθ::Int64)

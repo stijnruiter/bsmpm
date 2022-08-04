@@ -3,13 +3,13 @@ include("../src/simulation.jl")
 using Plots
 
 L = 1
-ni = 50
-nppc = 10
+ni = 21
+nppc = 4
 degree = 1
-E = 3e4;
-ρ = 2e3;
+E = 50;
+ρ = 1;
 ν = 0
-v0 = 0.8
+v0 = 0.1
 
 Δt = 1e-5
 tN = 5000

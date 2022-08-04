@@ -1,6 +1,3 @@
-
-
-
 function get_grid_cells(mpmgrid::MPMGrid{2})
     cx = unique(mpmgrid.splines[1].knot_vector)
     cy = unique(mpmgrid.splines[2].knot_vector)
@@ -10,32 +7,46 @@ function get_grid_cells(mpmgrid::MPMGrid{2})
     ly = kron(cy[1:(end-1)], ones(length(cx)-1))
     uy = kron(cy[2:end], ones(length(cx)-1))
     
-    return grid_cells = Rect.(lx, ly, ux, uy)
+    return Rect.(lx, ly, ux, uy)
+end
 
+function get_grid_cells(spline::BasisSpline)
+    cx = unique(spline.knot_vector)
+    return [(cx[i], cx[i+1]) for i=1:(length(cx)-1)]
 
-    # grid_cells = Vector{Rect}(undef, 0)
-    # count = 1
-    # nx = 0
-    # ny = 0
-    # for i = 1:ndof(mpmgrid.splines[1])
-    #     if mpmgrid.splines[1].knot_vector[i] < mpmgrid.splines[1].knot_vector[i+1]
-    #         for j = 1:ndof(mpmgrid.splines[2])
-    #             if mpmgrid.splines[2].knot_vector[j] < mpmgrid.splines[2].knot_vector[j + 1]
-    #                 insert!(grid_cells, count, Rect(mpmgrid.splines[1].knot_vector[i], mpmgrid.splines[2].knot_vector[j], mpmgrid.splines[1].knot_vector[i+1], mpmgrid.splines[2].knot_vector[j+1]))
-    #                 count += 1
-    #                 if nx == 0
-    #                     ny += 1
-    #                 end
-    #             end
-    #         end
-    #         nx += 1
-    #     end
-    # end
-    # return grid_cells, nx, ny
+end
+
+function get_grid_cells(mpmgrid::MPMGrid{1})
+    return get_grid_cells(mpmgrid.splines[1])
 end
 
 
-function identify_grid_cells(grid_cells::AbstractVector{Rect}, boundaryParticles::AbstractMatrix)
+function identify_grid_cells(spline::BasisSpline, grid_cells::AbstractVector{T}, boundaryParticles::AbstractVecOrMat) where {T<:Tuple{<:Real, <:Real}}
+    nx = length(unique(spline.knot_vector)) - 1
+
+    bound_ind = BitVector(undef, length(grid_cells))
+    bound_ind .= 0
+    for p = 1:size(boundaryParticles, 1)
+        bound_ind .|= contains.(grid_cells, boundaryParticles[p, 1])
+    end
+
+    # display(bound_ind)
+
+    relevant_ind = BitVector(undef, length(grid_cells))
+    relevant_ind .= 0
+    index = 1
+    lx = findfirst(bound_ind .== 1)
+    ux = findlast(bound_ind .== 1)
+    relevant_ind[lx:ux] .= 1
+    exterior = (relevant_ind .== 0)
+    interior = (bound_ind .== 0) .& (exterior .== 0) 
+
+    return interior, bound_ind, exterior
+end
+
+
+
+function identify_grid_cells(mpmgrid::MPMGrid{2}, grid_cells::AbstractVector{Rect}, boundaryParticles::AbstractMatrix)
     nx = length(unique(mpmgrid.splines[1].knot_vector)) - 1
     ny = length(unique(mpmgrid.splines[2].knot_vector)) - 1
 
@@ -52,6 +63,9 @@ function identify_grid_cells(grid_cells::AbstractVector{Rect}, boundaryParticles
         bounds = bound_ind[index:(index+nx-1)]
         lx = findfirst(bounds .== 1)
         ux = findlast(bounds .== 1)
+        if lx == ux
+            lx = 1
+        end
         if lx !== nothing && ux !== nothing
             relevant_ind[(index + lx - 1):(index+ux-1)] .= 1
         end
@@ -72,6 +86,8 @@ function plot_rect!(fig, r::AbstractVector{Rect}; fillcolor=false)
 end
 
 contains(a::Rect, px::Real, py::Real) = (a.lx <= px <= a.ux) && (a.ly <= py <= a.uy)
+contains(a::Tuple{<:Real, <:Real}, b::Tuple{<:Real, <:Real}) = (a[1] <= b[1] <= b[2] <= a[2])
+contains(a::Tuple{<:Real, <:Real}, b::Real) = (a[1] <= b <= a[2])
 
 function get_boundary_cells(grid_cells::AbstractVector{Rect}, boundary_particles::AbstractMatrix)
     indices = BitVector(undef, length(grid_cells))
@@ -88,14 +104,23 @@ end
 # grid_cells, interior, boundary, exterior = get_grid_cells(mpmgrid, boundaryParticles)
 # boundary_cell_indices = get_boundary_cells(grid_cells, boundaryParticles)
 
-function support(mpmgrid, i, j)
+function support(mpmgrid::MPMGrid{2}, i::Int, j::Int)
     return Rect(mpmgrid.splines[1].knot_vector[i], 
                 mpmgrid.splines[2].knot_vector[j], 
                 mpmgrid.splines[1].knot_vector[i+mpmgrid.splines[1].degree+1],
                 mpmgrid.splines[2].knot_vector[j+mpmgrid.splines[2].degree+1])
 end
 
-function support(mpmgrid, i)
+function support(mpmgrid::MPMGrid{1}, i::Int)
+    return support(mpmgrid.splines[1], i)
+end
+
+function support(spline::BasisSpline, i::Int)
+    return (spline.knot_vector[i], spline.knot_vector[i+spline.degree+1])
+
+end
+
+function support(mpmgrid::MPMGrid{2}, i::Int)
     ii = (i-1) % ndof(mpmgrid.splines[1]) + 1
     ij = floor(Int, (i-1) / ndof(mpmgrid.splines[1]) + 1)
     return support(mpmgrid, ii, ij)
@@ -125,8 +150,8 @@ function identify_splines(mpmgrid, grid_cells)
     return splines, grid
 end
 
-function identify_spline_stability(mpmgrid, grid_cells, boundaryParticles)
-    interior, boundary, exterior = identify_grid_cells(grid_cells, boundaryParticles)
+function identify_spline_stability(mpmgrid, grid_cells, grid_splines, boundaryParticles)
+    interior, boundary, exterior = identify_grid_cells(mpmgrid, grid_cells, boundaryParticles)
 
     relevant_splines = BitVector(undef, ndof(mpmgrid))
     stable_splines = BitVector(undef, ndof(mpmgrid))
@@ -177,6 +202,10 @@ function midpoint_distance(r1::Rect, r2::Rect)
     return sqrt((r1.ux + r1.lx - r2.ux - r2.lx)^2 + (r1.uy + r1.ly - r2.uy - r2.ly)^2) / 2
 end
 
+function midpoint_distance(r1::Tuple{<:Real, <:Real}, r2::Tuple{<:Real, <:Real})
+    return sqrt((sum(r1)/2 - sum(r2) / 2)^2)
+end
+
 function find_closest_stable_basis(grid_cells::AbstractVector{Rect}, interior::BitVector, boundary_index::Int)
     closest = findmin(hausdorff_distance.(grid_cells[interior], Ref(grid_cells[boundary_index])))
     return findall(interior)[closest[2]]
@@ -188,6 +217,11 @@ function find_closest_stable_basis_mid(grid_cells::AbstractVector{Rect}, interio
 end
 
 function find_closest_stable_basis_mid(grid_cells::AbstractVector{Rect}, interior::BitVector, suppB::Rect)
+    closest = findmin(midpoint_distance.(grid_cells[interior], Ref(suppB)))
+    return findall(interior)[closest[2]]
+end
+
+function find_closest_stable_basis_mid(grid_cells::AbstractVector{T}, interior::BitVector, suppB::T) where {T<:Tuple{<:Real, <:Real}}
     closest = findmin(midpoint_distance.(grid_cells[interior], Ref(suppB)))
     return findall(interior)[closest[2]]
 end

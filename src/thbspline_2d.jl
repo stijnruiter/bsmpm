@@ -175,6 +175,7 @@ mutable struct THBasisSplineDenseStorage2D{np, ni} <: AbstractBasisSplineStorage
     dB1::Matrix{Float64}
     dB2::Matrix{Float64}
     splines_1d::Vector{BasisSplineDenseStorage1D{np, ni1} where ni1}
+    active::BitVector
 end
 
 function initialize_spline_storage(nparticles::Int64, thb_grid::HierarchicalMPMGrid2D)
@@ -186,7 +187,8 @@ function initialize_spline_storage(nparticles::Int64, thb_grid::HierarchicalMPMG
     return THBasisSplineDenseStorage2D{nparticles, ndof(thb_grid)}(zeros(nparticles, ndof(thb_grid)), 
             zeros(nparticles, ndof(thb_grid)), 
             zeros(nparticles, ndof(thb_grid)), 
-            storages_1D)
+            storages_1D, 
+            BitVector(ones(ndof(thb_grid))))
 end
 
 function get_active_1d_spline_indices(active_spline_indices::AbstractVector{Int64}, grids::AbstractVector{MPMGrid{2}}, hierDom::HierarchicalDomain2D)
@@ -198,7 +200,29 @@ function get_active_1d_spline_indices(active_spline_indices::AbstractVector{Int6
     return indices
 end
 
-function compute_bspline_values!(storage::THBasisSplineDenseStorage2D, coord::AbstractMatrix{<:Real}, thb_grid::HierarchicalMPMGrid2D)
+# function compute_bspline_values!(storage::THBasisSplineDenseStorage2D, coord::AbstractMatrix{<:Real}, thb_grid::HierarchicalMPMGrid2D)
+#     for i = 1:maxlevel(thb_grid)
+#         compute_bspline_values!(storage.splines_1d[i * 2 - 1], coord[:, 1], thb_grid.grids[i].splines[1])
+#         compute_bspline_values!(storage.splines_1d[i * 2], coord[:, 2], thb_grid.grids[i].splines[2])
+#     end
+#     current_index = 1
+#     for i = 1:maxlevel(thb_grid)
+#         for j ∈ thb_grid.active_spline_indices_2D[i]
+#             i1, i2 = get_spline_indices(j, thb_grid.grids[i])
+#             storage.B[:, current_index] = storage.splines_1d[i * 2 - 1].B[:, i1] .* storage.splines_1d[i * 2].B[:, i2]
+#             storage.dB1[:, current_index] = storage.splines_1d[i * 2 - 1].dB[:, i1] .* storage.splines_1d[i * 2].B[:, i2]
+#             storage.dB2[:, current_index] = storage.splines_1d[i * 2 - 1].B[:, i1] .* storage.splines_1d[i * 2].dB[:, i2]
+#             current_index += 1
+#         end
+#     end
+#     truncate_bsplines!(storage, thb_grid)
+# end
+
+function compute_hbspline_values!(storage::THBasisSplineDenseStorage2D, particles::Particles, thb_grid::HierarchicalMPMGrid2D)
+    compute_hbspline_values!(storage, particles.position, thb_grid)
+end
+
+function compute_hbspline_values!(storage::THBasisSplineDenseStorage2D, coord::AbstractMatrix{<:Real}, thb_grid::HierarchicalMPMGrid2D)
     for i = 1:maxlevel(thb_grid)
         compute_bspline_values!(storage.splines_1d[i * 2 - 1], coord[:, 1], thb_grid.grids[i].splines[1])
         compute_bspline_values!(storage.splines_1d[i * 2], coord[:, 2], thb_grid.grids[i].splines[2])
@@ -212,47 +236,23 @@ function compute_bspline_values!(storage::THBasisSplineDenseStorage2D, coord::Ab
             storage.dB2[:, current_index] = storage.splines_1d[i * 2 - 1].B[:, i1] .* storage.splines_1d[i * 2].dB[:, i2]
             current_index += 1
         end
-    end
+    end    
+end
+function compute_thbspline_values!(storage::THBasisSplineDenseStorage2D, particles::Particles, thb_grid::HierarchicalMPMGrid2D)
+    compute_thbspline_values!(storage, particles.position, thb_grid)
+end
+function compute_thbspline_values!(storage::THBasisSplineDenseStorage2D, coord::AbstractMatrix{<:Real}, thb_grid::HierarchicalMPMGrid2D)
+    compute_hbspline_values!(storage, coord, thb_grid)
     truncate_bsplines!(storage, thb_grid)
 end
 
+function compute_ethbspline_values!(storage::THBasisSplineDenseStorage2D, particles::Particles, thb_grid::HierarchicalMPMGrid2D)
+    compute_hbspline_values!(storage, particles.position, thb_grid)
+    truncate_bsplines!(storage, thb_grid)
+    web_splines!(storage, thb_grid, particles.position[particles.bel, :])
+end
+
 function truncate_bsplines!(storage::THBasisSplineDenseStorage2D, thb_grid::HierarchicalMPMGrid2D)
-    # if maxlevel(thb_grid) > 2 
-    #     throw(NotImplementedException("Higher level truncation"))
-    # end
-    # ci = 1
-    # S1 = thb_grid.subdivisions[1]
-    # S2 = thb_grid.subdivisions[2]
-    # offset = length(thb_grid.active_spline_indices_2D[1])
-    # for si ∈ thb_grid.active_spline_indices_2D[1]
-    #     si1, si2 = get_spline_indices(si, thb_grid.grids[1])
-    #     cj = 1
-    #     for sj ∈ thb_grid.active_spline_indices_2D[2]
-    #         sj1, sj2 = get_spline_indices(sj, thb_grid.grids[2])
-    #         storage.B[:, ci] -= storage.B[:, offset + cj] * S1[sj1, si1] * S2[sj2, si2]
-    #         storage.dB1[:, ci] -= storage.dB1[:, offset + cj] * S1[sj1, si1] * S2[sj2, si2]
-    #         storage.dB2[:, ci] -= storage.dB2[:, offset + cj] * S1[sj1, si1] * S2[sj2, si2]
-    #         cj += 1
-    #     end
-    #     ci += 1
-    # end
-
-
-
-    # for i = 1:(maxlevel(thb_grid)-1)
-    #     S1 = thb_grid.subdivisions[i*2-1]
-    #     S2 = thb_grid.subdivisions[i*2]
-    #     for j = (i+1):maxlevel(thbspline)
-    #         for si ∈ thb_grid.active_spline_indices_2D[i]
-    #             i1, i2 = get_spline_indices(si, thb_grid.grids[i])
-    #             storage.B[:, ci] -= storages.B[:, thbspline.active_spline_indices[j]] * S[thbspline.active_spline_indices[j], :]
-    #         end
-    #     end
-    # end
-
-
-    #     # current_index += length(thb_grid.active_spline_indices_2D[i])
-    # end
     offsets = [0; cumsum(length.(thb_grid.active_spline_indices_2D))]
     for i = 1:(maxlevel(thb_grid)-1)
         S = thb_grid.subdivisions[i]
@@ -265,6 +265,48 @@ function truncate_bsplines!(storage::THBasisSplineDenseStorage2D, thb_grid::Hier
             end
         end
     end
+end
+
+function web_splines!(storage::THBasisSplineDenseStorage2D, thb_grid::HierarchicalMPMGrid2D, boundaryParticles::AbstractMatrix)
+    offsets = [0; cumsum(length.(thb_grid.active_spline_indices_2D))]
+    for l = 1:maxlevel(thb_grid)
+        grid_cells = get_grid_cells(thb_grid.grids[l])
+        splines, grid_splines = identify_splines(thb_grid.grids[l], grid_cells)
+        interior, boundary, exterior = identify_grid_cells(thb_grid.grids[l], grid_cells, boundaryParticles)
+        stable_splines, unstable, exterior_splines = identify_spline_stability(thb_grid.grids[l], grid_cells, grid_splines, boundaryParticles)
+        storage.active[(offsets[l]+1):offsets[l+1]] = stable_splines[thb_grid.active_spline_indices_2D[l]]
+        for j ∈ findall(unstable)
+            if j in thb_grid.active_spline_indices_2D[l]
+                suppBj = support(thb_grid.grids[l], j)
+                closest_stable_grid_cell = find_closest_stable_basis_mid(grid_cells, interior, suppBj)
+                stable_supp = grid_splines[closest_stable_grid_cell]
+        
+                Bi = grid_cells[closest_stable_grid_cell]
+                vj_1 = (j - 1) % ndof(thb_grid.grids[l].splines[1]) + 1
+                vj_2 = floor(Int, (j - 1) / ndof(thb_grid.grids[l].splines[1]) + 1)
+                
+                rtaylor_1 = (Bi.lx + Bi.ux) / 2
+                rtaylor_2 = (Bi.ly + Bi.uy) / 2
+
+                e_ij_1 = compute_eij_1d(thb_grid.grids[l].splines[1], rtaylor_1, vj_1)
+                e_ij_2 = compute_eij_1d(thb_grid.grids[l].splines[2], rtaylor_2, vj_2)
+
+                e_ij = (kron(ones(ndof(thb_grid.grids[l].splines[2])), e_ij_1) .* kron(e_ij_2, ones(ndof(thb_grid.grids[l].splines[1]))))[stable_supp]
+                
+                indices = find_index_in_supmat(stable_supp, thb_grid, l)
+                in_truncation = indices .!= nothing
+                indices = indices[in_truncation] .+ offsets[l]
+                j_offset = findfirst(thb_grid.active_spline_indices_2D[l] .== j) + offsets[l]
+                storage.B[:, indices] += storage.B[:, j_offset] * e_ij[in_truncation]'
+                storage.dB1[:, indices] += storage.dB1[:, j_offset] * e_ij[in_truncation]'
+                storage.dB2[:, indices] += storage.dB2[:, j_offset] * e_ij[in_truncation]'
+            end
+        end
+    end
+end
+
+function find_index_in_supmat(splines, thb_grid, level)
+    return [findfirst(thb_grid.active_spline_indices_2D[level] .== splines[i]) for i in eachindex(splines)]
 end
 
 function get_boundary_indices(thb_grid::HierarchicalMPMGrid2D; fix_left::Bool = false, 
@@ -286,40 +328,3 @@ function get_boundary_indices(thb_grid::HierarchicalMPMGrid2D; fix_left::Bool = 
     scalar_indices = sort(unique([indices_1; indices_2]))
     return DirichletBoundaryConditions{2}(scalar_indices, vector_indices)
 end
-
-# Ω0 = Rect(0, 0, 1, 1)
-# Ω1 = [Rect(0, 0.5, 1, 1); Rect(0.5, 0, 1, 1); Rect(0, 0, 0.3, 0.3)]
-# Ω2 = [Rect(0.5, 0.5, 1, 1)]
-# hierDom = HierarchicalDomain2D(Ω0, Ω1, Ω2)
-
-# ni = 5
-# degree = 2
-
-
-# mpmgrid = MPMGrid((Ω0.lx, Ω0.ux), ni, degree, (Ω0.ly, Ω0.uy), ni, degree)
-# # active_spline_indices, refinedGrids = compute_active_splines(mpmgrid, hierDom)
-
-# thb_grid = HierarchicalMPMGrid2D(mpmgrid, hierDom)
-# particles = initialize_uniform_particles(thb_grid.grids[1], 1, 20, 20)
-# storage = initialize_spline_storage(nparticles(particles), thb_grid)
-# compute_bspline_values!(storage, particles.position, thb_grid)
-
-# # particles = initialize_uniform_particles(mpmgrid, 1, 10, 10)
-# # storages = Vector{BasisSplineDenseStorage2D}(undef, length(refinedGrids))
-# # for i = 1:length(storages)
-# #     storages[i] = initialize_spline_storage(particles, refinedGrids[i])
-# #     compute_bspline_values!(storages[i], particles.position, refinedGrids[i].splines)
-# # end
-
-# get_plot_shape(r::Rect) = Shape([r.lx,r.ux,r.ux,r.lx], [r.ly,r.ly,r.uy,r.uy])
-
-# for j = 1:length(thb_grid.grids)
-#     fig = plot(camera=(0, 90), legend=false, xlims = thb_grid.grids[1].bounds[1], ylims = thb_grid.grids[1].bounds[2])
-#     for i ∈ thb_grid.active_spline_indices_2D[j]
-#         s = get_plot_shape(get_spline_support(i, thb_grid.grids[j]))
-#         plot!(s)
-#     end
-#     display(fig)
-# end
-
-# bc = get_boundary_indices(thb_grid; fix_right = true)

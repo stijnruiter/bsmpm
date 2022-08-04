@@ -20,17 +20,32 @@ function get_identity_matrix(np::Int, dim::Int)
     end
 end
 
-function compute_symmetric(matrix::AbstractVecOrMat{Float64})
+function compute_symmetric!(matrix::AbstractVecOrMat{Float64})
     if size(matrix, 2) == 1
         return matrix
     elseif size(matrix, 2) == 4
         matrix[:, 2] = 0.5*(matrix[:, 2] + matrix[:, 3])
-        matrix[:, 3] = matrix[:, 2]
+        matrix[:, 3] .= matrix[:, 2]
         return matrix
     else
         throw(DimNotImplementedException())
     end
 end 
+
+
+function compute_symmetric(matrix::AbstractVecOrMat{Float64})
+    if size(matrix, 2) == 1
+        return deepcopy(matrix)
+    elseif size(matrix, 2) == 4
+        mat = deepcopy(matrix)
+        mat[:, 2] = 0.5*(matrix[:, 2] + matrix[:, 3])
+        mat[:, 3] .= mat[:, 2]
+        return mat
+    else
+        throw(DimNotImplementedException())
+    end
+end 
+
 function compute_determinant(matrix::AbstractVecOrMat{Float64})
     if size(matrix, 2) == 1
         return vec(matrix)
@@ -40,6 +55,13 @@ function compute_determinant(matrix::AbstractVecOrMat{Float64})
         throw(DimNotImplementedException())
     end
 end 
+
+# function transpose_mat(A::AbstractVecOrMat)
+#     if size(A, 2) == 1
+#         return A
+#     elseif size(A, 2) == 4
+#         return view
+# end
 
 function compute_matrix_product(A::AbstractMatrix, B::AbstractMatrix)
     (np, dim) = size(A)
@@ -107,9 +129,22 @@ function test_mat_mult(n::Int=10)
     return true
 end
 
-function populate_square_or_triangle(corners::AbstractVector{T}, np1::Int, np2::Int) where T <: Tuple{<:Real, <:Real}
-    s = range(0, stop=1, length=np1)
-    t = range(0, stop=1, length=np2)
+function populate_square_or_triangle(corners::AbstractVector{T}, np1::Int, np2::Int;onedge::Bool = false) where T <: Tuple{<:Real, <:Real}
+    s1 = 0
+    s2 = 1
+    t1 = 0
+    t2 = 1
+    if !onedge
+        ds = 1/np1
+        dt = 1/np2
+        s1 = ds/2
+        s2 = 1 - ds/2
+        t1 = dt/2
+        t2 = 1 - dt/2
+    end
+    
+    s = range(s1, stop=s2, length=np1)
+    t = range(t1, stop=t2, length=np2)
     n  = 1
     pos = zeros(length(s) * length(t), 2)
     bel = BitVector(undef, np1*np2)
@@ -120,7 +155,7 @@ function populate_square_or_triangle(corners::AbstractVector{T}, np1::Int, np2::
         for i ∈ s
             for j ∈ t
                 pos[n,begin], pos[n, end] = (1-j)*i .*corners[1] .+ j .*i .* corners[2] .+ (1-i).* corners[3]
-                if i == 1 || j == 1 || i == 0 || j == 0
+                if i == s1 || j == t1 || i == s2 || j == t2
                     bel[n] = 1
                 end
                 n += 1
@@ -130,7 +165,7 @@ function populate_square_or_triangle(corners::AbstractVector{T}, np1::Int, np2::
         for i ∈ s
             for j ∈ t
                 pos[n,begin], pos[n, end] = (1-j) .*((1-i).*corners[1] .+ i .*corners[2]) .+ j.*((1-i).*corners[4] .+ i .*corners[3])
-                if i == 1 || j == 1 || i == 0 || j == 0
+                if i == s1 || j == t1 || i == s2 || j == t2
                     bel[n] = 1
                 end
                 n += 1

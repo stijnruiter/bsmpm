@@ -11,7 +11,7 @@ degree = 2
 E = 1e2
 ρ = 1e3
 Δt = 1e-4
-tN = 200
+tN = 375
 tend = Δt * tN
 τ = 1
 α = (L*τ)/(ρ * π)
@@ -22,9 +22,11 @@ corners = [ (0.0, 0.0),
             (0.0, H)]
 
 function corner_force(t::Real, model::Model{2}, particles::Particles{2, np}, mpmgrid::MPMGrid{2}, splines::AbstractBasisSplineStorage) where np
+    F = 40
+    return splines.B[end, :] * [F F]
     global L, τ, α, traction_storage, oppY
     current_topright_corner_particle = (particles.position[end, :].+sqrt(particles.volume[end])/2)'
-    F = 40
+
     compute_bspline_values!(traction_storage, current_topright_corner_particle, mpmgrid.splines)
     return traction_storage.B' * [F F]
 end
